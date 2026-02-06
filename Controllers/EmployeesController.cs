@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -33,9 +33,13 @@ namespace HRManagementApp.Controllers
 
             // Store counts in ViewBag for the UI cards
             ViewBag.TotalCount = allData.Count;
+
+            // Logic: Count only those who clocked in TODAY with specific statuses
             ViewBag.PresentToday = allData.Count(e => e.AttendanceStatus == "Present" && e.ClockInTime.Date == DateTime.Today);
             ViewBag.LateToday = allData.Count(e => e.AttendanceStatus == "Late" && e.ClockInTime.Date == DateTime.Today);
-            ViewBag.AbsentToday = allData.Count(e => e.AttendanceStatus == "Absent" || (e.ClockInTime.Date != DateTime.Today && e.AttendanceStatus != "Present"));
+
+            // Logic: Absent means they are marked absent OR they haven't clocked in at all today
+            ViewBag.AbsentToday = allData.Count(e => e.AttendanceStatus == "Absent" || (e.ClockInTime.Date != DateTime.Today));
 
             // Search Filter
             if (!String.IsNullOrEmpty(searchString))
@@ -59,7 +63,9 @@ namespace HRManagementApp.Controllers
 
             foreach (var emp in data)
             {
-                builder.AppendLine($"{emp.Id},{emp.Name},{emp.Email},{emp.Department},{emp.ClockInTime},{emp.AttendanceStatus}");
+                // Clean the data for CSV (removing commas from names if they exist)
+                var safeName = emp.Name?.Replace(",", "");
+                builder.AppendLine($"{emp.Id},{safeName},{emp.Email},{emp.Department},{emp.ClockInTime:yyyy-MM-dd HH:mm},{emp.AttendanceStatus}");
             }
 
             // Returns the data as a downloadable file
@@ -67,7 +73,7 @@ namespace HRManagementApp.Controllers
         }
 
         // ==========================================
-        // 3. NEW: API INTEGRATION (FETCH EXTERNAL DATA)
+        // 3. NEW: API INTEGRATION (RANDOMIZED FETCH)
         // ==========================================
         public async Task<IActionResult> FetchFromApi()
         {
@@ -75,8 +81,11 @@ namespace HRManagementApp.Controllers
             {
                 try
                 {
-                    // Calling a public API to simulate grabbing remote employee data
-                    var response = await client.GetStringAsync("https://jsonplaceholder.typicode.com/users/1");
+                    // RANDOMIZER: Pick a random ID between 1 and 10 so it's not always Leanne Graham
+                    int randomUserId = new Random().Next(1, 11);
+
+                    // Calling the public API with the random ID
+                    var response = await client.GetStringAsync($"https://jsonplaceholder.typicode.com/users/{randomUserId}");
                     using var doc = JsonDocument.Parse(response);
                     var root = doc.RootElement;
 
@@ -91,17 +100,18 @@ namespace HRManagementApp.Controllers
 
                     _context.Add(newEmployee);
                     await _context.SaveChangesAsync();
+
+                    TempData["Success"] = $"Successfully imported {newEmployee.Name} from external API!";
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    // If API fails, we could log the error here
-                    TempData["Error"] = "Could not fetch API data.";
+                    TempData["Error"] = "Could not fetch API data. Please check your internet connection.";
                 }
             }
             return RedirectToAction(nameof(Index));
         }
 
-        // --- EXISTING CRUD METHODS ---
+        // --- EXISTING CRUD METHODS (Kept intact) ---
 
         public async Task<IActionResult> Details(int? id)
         {
