@@ -6,6 +6,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using HRManagementApp.Data;
 using HRManagementApp.Models;
+using System.Text; // Required for CSV generation
+using System.Net.Http; // Required for API Fetch
+using System.Text.Json; // Required for API JSON parsing
 
 namespace HRManagementApp.Controllers
 {
@@ -18,18 +21,87 @@ namespace HRManagementApp.Controllers
             _context = context;
         }
 
-        // GET: Employees (With Search)
+        // ==========================================
+        // 1. UPDATED INDEX: CALCULATES DASHBOARD STATS
+        // ==========================================
         public async Task<IActionResult> Index(string searchString)
         {
-            var employees = from e in _context.Employee select e;
+            var employeesQuery = from e in _context.Employee select e;
 
+            // Fetch all for dashboard calculations
+            var allData = await employeesQuery.ToListAsync();
+
+            // Store counts in ViewBag for the UI cards
+            ViewBag.TotalCount = allData.Count;
+            ViewBag.PresentToday = allData.Count(e => e.AttendanceStatus == "Present" && e.ClockInTime.Date == DateTime.Today);
+            ViewBag.LateToday = allData.Count(e => e.AttendanceStatus == "Late" && e.ClockInTime.Date == DateTime.Today);
+            ViewBag.AbsentToday = allData.Count(e => e.AttendanceStatus == "Absent" || (e.ClockInTime.Date != DateTime.Today && e.AttendanceStatus != "Present"));
+
+            // Search Filter
             if (!String.IsNullOrEmpty(searchString))
             {
-                employees = employees.Where(s => s.Name.Contains(searchString));
+                employeesQuery = employeesQuery.Where(s => s.Name.Contains(searchString));
             }
 
-            return View(await employees.ToListAsync());
+            return View(await employeesQuery.ToListAsync());
         }
+
+        // ==========================================
+        // 2. NEW: DOWNLOAD ATTENDANCE REPORT (CSV)
+        // ==========================================
+        public async Task<IActionResult> DownloadReport()
+        {
+            var data = await _context.Employee.ToListAsync();
+            var builder = new StringBuilder();
+
+            // CSV Headers
+            builder.AppendLine("ID,Name,Email,Department,ClockInTime,Status");
+
+            foreach (var emp in data)
+            {
+                builder.AppendLine($"{emp.Id},{emp.Name},{emp.Email},{emp.Department},{emp.ClockInTime},{emp.AttendanceStatus}");
+            }
+
+            // Returns the data as a downloadable file
+            return File(Encoding.UTF8.GetBytes(builder.ToString()), "text/csv", $"Attendance_Report_{DateTime.Now:yyyyMMdd}.csv");
+        }
+
+        // ==========================================
+        // 3. NEW: API INTEGRATION (FETCH EXTERNAL DATA)
+        // ==========================================
+        public async Task<IActionResult> FetchFromApi()
+        {
+            using (var client = new HttpClient())
+            {
+                try
+                {
+                    // Calling a public API to simulate grabbing remote employee data
+                    var response = await client.GetStringAsync("https://jsonplaceholder.typicode.com/users/1");
+                    using var doc = JsonDocument.Parse(response);
+                    var root = doc.RootElement;
+
+                    var newEmployee = new Employee
+                    {
+                        Name = root.GetProperty("name").GetString(),
+                        Email = root.GetProperty("email").GetString(),
+                        Department = "Remote/External",
+                        ClockInTime = DateTime.Now,
+                        AttendanceStatus = "Present"
+                    };
+
+                    _context.Add(newEmployee);
+                    await _context.SaveChangesAsync();
+                }
+                catch (Exception ex)
+                {
+                    // If API fails, we could log the error here
+                    TempData["Error"] = "Could not fetch API data.";
+                }
+            }
+            return RedirectToAction(nameof(Index));
+        }
+
+        // --- EXISTING CRUD METHODS ---
 
         public async Task<IActionResult> Details(int? id)
         {
